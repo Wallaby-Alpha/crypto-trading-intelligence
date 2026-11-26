@@ -1,0 +1,18 @@
+[Unit]
+Description=Crypto Trading Intelligence Streamlit Dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/crypto_trading_intelligence
+ExecStart=/home/ubuntu/crypto_trading_intelligence/venv/bin/streamlit run dashboard/app.py --server.port 8501 --server.address 0.0.0.0
+Restart=always
+RestartSec=10
+EnvironmentFile=/home/ubuntu/crypto_trading_intelligence/.env
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+

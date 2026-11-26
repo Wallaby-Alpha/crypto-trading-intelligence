@@ -1,0 +1,23 @@
+[Unit]
+Description=Crypto Trading Intelligence 50-Asset Scanner Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/crypto_trading_intelligence
+ExecStart=/home/ubuntu/crypto_trading_intelligence/venv/bin/python main.py scan
+Restart=always
+RestartSec=10
+EnvironmentFile=/home/ubuntu/crypto_trading_intelligence/.env
+StandardOutput=journal
+StandardError=journal
+
+# Resource limits
+LimitNOFILE=65536
+MemoryMax=2G
+CPUQuota=150%
+
+[Install]
+WantedBy=multi-user.target
+

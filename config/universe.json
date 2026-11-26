@@ -1,0 +1,25 @@
+{
+  "max_monitored_assets": 50,
+  "default_quote": "USDT",
+  "min_24h_volume_usd": 10000000.0,
+  "max_spread_pct": 0.15,
+  "min_open_interest_usd": 1000000.0,
+  "refresh_interval_hours": 4,
+  "priority_symbols": [
+    "BTC/USDT:USDT",
+    "ETH/USDT:USDT",
+    "SOL/USDT:USDT",
+    "TAO/USDT:USDT",
+    "SUI/USDT:USDT",
+    "DOGE/USDT:USDT",
+    "AVAX/USDT:USDT",
+    "LINK/USDT:USDT",
+    "XRP/USDT:USDT",
+    "NEAR/USDT:USDT",
+    "RENDER/USDT:USDT",
+    "INJ/USDT:USDT",
+    "APT/USDT:USDT",
+    "ARB/USDT:USDT",
+    "OP/USDT:USDT"
+  ]
+}

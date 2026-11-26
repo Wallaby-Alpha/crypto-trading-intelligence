@@ -1,0 +1,29 @@
+# Environment and secrets
+.env
+*.env
+!.env.example
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Databases and large data files
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+data/*.parquet
+data/*.csv
+!data/.gitkeep
+
+# Logs
+logs/
+*.log
+live_bot.log
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
