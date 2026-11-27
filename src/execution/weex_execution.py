@@ -57,6 +57,22 @@ class WeexExecutionAdapter:
         """
         return self.live_trading_enabled
 
+    def get_futures_balance(self) -> Dict[str, Any]:
+        """Fetches free USDT balance in the WEEX swap/contract wallet."""
+        if not self.live_trading_enabled or not self.client:
+            return {"status": "DISABLED", "balance": 0.0}
+        try:
+            balance = self.client.fetch_balance(params={'type': 'swap'})
+            usdt_free = 0.0
+            if 'USDT' in balance:
+                usdt_free = float(balance['USDT'].get('free') or balance['USDT'].get('total') or 0.0)
+            elif 'free' in balance and 'USDT' in balance['free']:
+                usdt_free = float(balance['free']['USDT'] or 0.0)
+            return {"status": "SUCCESS", "usdt_free": usdt_free}
+        except Exception as e:
+            logger.error(f"Failed to fetch WEEX balance: {e}")
+            return {"status": "ERROR", "error": str(e)}
+
     def execute_signal(self, signal: TradeSignal) -> Dict[str, Any]:
         """
         Submits market entry and bracket TP/SL orders on WEEX perpetuals.

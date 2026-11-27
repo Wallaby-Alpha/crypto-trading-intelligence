@@ -130,6 +130,17 @@ class LiveTradingBot:
         except Exception as e:
             logger.warning(f"Could not load full market metadata: {e}")
 
+        balance_extra = ""
+        if self.weex_exec.check_authorization():
+            bal = await asyncio.to_thread(self.weex_exec.get_futures_balance)
+            if bal.get("status") == "SUCCESS":
+                u_free = bal.get("usdt_free", 0.0)
+                balance_extra = f"\n• <b>Futures Balance:</b> <code>${u_free:,.2f} USDT</code>"
+                if u_free < self.risk_governor.trade_margin_usd:
+                    balance_extra += f"\n⚠️ <i>NOTE: Contract balance is low. Ensure USDT is transferred from Spot to USDT-M Futures.</i>"
+            elif bal.get("status") == "ERROR":
+                balance_extra = f"\n⚠️ <b>Balance API Error:</b> <code>{bal.get('error')}</code>"
+
         # Telegram startup greeting
         mode_str = "LIVE REAL-MONEY" if self.weex_exec.check_authorization() else "PAPER / DRY-RUN"
         msg = (
@@ -139,6 +150,7 @@ class LiveTradingBot:
             f"• <b>Max Positions:</b> <code>{self.risk_governor.max_open_positions}</code>\n"
             f"• <b>Leverage:</b> <code>{self.risk_governor.default_leverage}x</code>\n"
             f"• <b>Monitored:</b> {len(self.symbols)} liquid markets"
+            f"{balance_extra}"
         )
         await self.telegram.send_message(msg)
 
@@ -225,6 +237,10 @@ class LiveTradingBot:
             # Sizing via De Minimis Risk Governor
             meta = self.market_metadata.get(symbol)
             contracts, notional = self.risk_governor.calculate_position_size(symbol, current_price, meta)
+            if contracts <= 0 or notional <= 0:
+                logger.info(f"Skipping {symbol}: sizing safety bounds skipped trade.")
+                return
+
             best_signal.contracts = contracts
             best_signal.position_size_usd = notional
 
@@ -238,6 +254,19 @@ class LiveTradingBot:
             res = self.weex_exec.execute_signal(best_signal)
             order_id = res.get("order_id")
             sl_order_id = res.get("sl_order_id")
+
+            if res.get("status") == "FAILED":
+                err_msg = res.get("error", "Unknown exchange error")
+                logger.error(f"❌ LIVE EXECUTION FAILED on WEEX for {symbol}: {err_msg}")
+                try:
+                    await self.telegram.send_message(
+                        f"⚠️ <b>WEEX LIVE ORDER REJECTED!</b>\n"
+                        f"• <b>Market:</b> <code>{symbol}</code>\n"
+                        f"• <b>Error:</b> <code>{err_msg}</code>\n\n"
+                        f"<i>Check futures account balance or API key permissions.</i>"
+                    )
+                except Exception as te:
+                    logger.warning(f"Failed to send failure alert: {te}")
 
             # Register Active Position
             self.active_positions[symbol] = ActiveLivePosition(

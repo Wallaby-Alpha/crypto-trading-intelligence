@@ -8,12 +8,40 @@ from src.strategies.models import SignalDirection
 
 
 def test_risk_governor_sizing_and_notional():
-    governor = RiskGovernor(trade_margin_usd=20.0, default_leverage=3, max_open_positions=2)
-    contracts, notional = governor.calculate_position_size("BTC/USDT:USDT", price=90000.0)
+    governor = RiskGovernor(trade_margin_usd=15.0, default_leverage=2, max_open_positions=2)
+    
+    # 1. BTC with contractSize = 0.0001
+    btc_meta = {
+        "contractSize": 0.0001,
+        "precision": {"amount": 0.0001},
+        "limits": {"amount": {"min": 0.0001}}
+    }
+    contracts, notional = governor.calculate_position_size("BTC/USDT:USDT", price=60000.0, market_meta=btc_meta)
+    # $15 margin * 2x leverage = $30 target notional -> 0.0005 BTC = $30.00
+    assert contracts == 0.0005
+    assert 25.0 <= notional <= 45.0
 
-    # 20 margin * 3x leverage = $60 notional
-    assert notional >= 50.0
-    assert contracts > 0
+    # 2. DOGE with contractSize = 100.0
+    doge_meta = {
+        "contractSize": 100.0,
+        "precision": {"amount": 100.0},
+        "limits": {"amount": {"min": 100.0}}
+    }
+    contracts, notional = governor.calculate_position_size("DOGE/USDT:USDT", price=0.06, market_meta=doge_meta)
+    # $30 / 0.06 = 500 DOGE -> 500.0 DOGE = $30.00
+    assert contracts == 500.0
+    assert 25.0 <= notional <= 45.0
+
+    # 3. Safety cap: If min order size would cost $500, it must reject (0.0, 0.0)
+    huge_min_meta = {
+        "contractSize": 1.0,
+        "precision": {"amount": 1.0},
+        "limits": {"amount": {"min": 10.0}}
+    }
+    contracts, notional = governor.calculate_position_size("EXPENSIVE/USDT", price=50.0, market_meta=huge_min_meta)
+    # 10 * $50 = $500 >> $45 max allowable
+    assert contracts == 0.0
+    assert notional == 0.0
 
 
 def test_risk_governor_max_positions_cap():

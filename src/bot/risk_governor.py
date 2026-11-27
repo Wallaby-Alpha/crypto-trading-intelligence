@@ -76,34 +76,56 @@ class RiskGovernor:
         market_meta: Optional[Dict[str, Any]] = None
     ) -> Tuple[float, float]:
         """
-        Calculates contracts and total notional value for a de minimis order.
-        Returns: (contracts, notional_usd)
+        Calculates quantity (in base currency / coins for CCXT) and total notional USD.
+        Properly handles exchange step size, lot limits, and enforces safety bounds.
+        Returns: (amount, notional_usd)
         """
         target_notional = self.trade_margin_usd * self.default_leverage
 
         if target_notional < self.min_notional_usd:
             target_notional = self.min_notional_usd
 
-        raw_contracts = target_notional / max(price, 1e-6)
+        raw_amount = target_notional / max(price, 1e-6)
 
-        # Exchange precision & contract size rounding
         if market_meta:
+            # CCXT precision['amount'] or contractSize defines the step size
+            precision_amount = market_meta.get("precision", {}).get("amount")
             contract_size = market_meta.get("contractSize", 1.0) or 1.0
-            precision_amount = market_meta.get("precision", {}).get("amount", 4)
+
+            if precision_amount is not None:
+                if isinstance(precision_amount, (int, float)) and precision_amount < 1.0:
+                    step = float(precision_amount)
+                elif isinstance(precision_amount, int):
+                    step = 10 ** (-precision_amount)
+                else:
+                    step = float(precision_amount)
+            else:
+                step = float(contract_size) if contract_size else 0.001
+
             limits = market_meta.get("limits", {}).get("amount", {})
-            min_amount = limits.get("min", 0.001) or 0.001
+            min_amount = float(limits.get("min") or step or 0.001)
 
-            # Adjust by contract size if linear/inverse
-            effective_contracts = raw_contracts / contract_size
-            step = 10 ** (-precision_amount) if isinstance(precision_amount, int) else float(precision_amount or 0.001)
+            # Sizing in terms of discrete steps
+            num_steps = round(raw_amount / step) if step > 0 else 1
+            amount = max(num_steps * step, min_amount)
 
-            # Round down to precision step to avoid exchange rejection
-            contracts = math.floor(effective_contracts / step) * step
-            contracts = max(contracts, min_amount)
-            contracts = round(contracts, precision_amount if isinstance(precision_amount, int) else 4)
+            # Round to precision decimal places
+            decimals = 0 if step >= 1.0 else len(str(step).split(".")[1]) if "." in str(step) else 4
+            amount = round(amount, decimals)
         else:
-            contracts = round(raw_contracts, 4)
+            amount = round(raw_amount, 4)
 
-        actual_notional = contracts * price
-        return contracts, actual_notional
+        actual_notional = amount * price
+
+        # Safety Guard: Ensure actual notional never balloons above target notional by more than 1.5x
+        max_allowed_notional = target_notional * 1.5
+        if actual_notional > max_allowed_notional:
+            logger.warning(
+                f"Sizing safety cap triggered for {symbol}: actual notional ${actual_notional:,.2f} "
+                f"exceeds max allowable ${max_allowed_notional:,.2f} (target: ${target_notional:,.2f}). "
+                f"Skipping trade to protect account."
+            )
+            return 0.0, 0.0
+
+        return amount, actual_notional
 
