@@ -108,3 +108,10 @@ def test_weex_execution_adapter_safety_mode(sample_long_signal):
     kill_res = adapter.emergency_kill_switch()
     assert kill_res["status"] == "SUCCESS"
 
+    # update_stop_loss and close_position operate safely in simulation mode
+    sl_res = adapter.update_stop_loss("BTC/USDT:USDT", 0.0005, sample_long_signal.direction, 61000.0)
+    assert sl_res["status"] == "SIMULATED_SUCCESS"
+
+    close_res = adapter.close_position("BTC/USDT:USDT", 0.0005, sample_long_signal.direction)
+    assert close_res["status"] == "SIMULATED_SUCCESS"
+

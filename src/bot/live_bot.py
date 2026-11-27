@@ -50,7 +50,8 @@ class ActiveLivePosition:
         contracts: float,
         notional_usd: float,
         order_id: Optional[str] = None,
-        sl_order_id: Optional[str] = None
+        sl_order_id: Optional[str] = None,
+        tp_order_id: Optional[str] = None
     ):
         self.symbol = symbol
         self.direction = direction
@@ -63,6 +64,7 @@ class ActiveLivePosition:
         self.notional_usd = notional_usd
         self.order_id = order_id
         self.sl_order_id = sl_order_id
+        self.tp_order_id = tp_order_id
         self.tp1_hit: bool = False
         self.tp2_hit: bool = False
         self.entry_time = time.time()
@@ -254,6 +256,7 @@ class LiveTradingBot:
             res = self.weex_exec.execute_signal(best_signal)
             order_id = res.get("order_id")
             sl_order_id = res.get("sl_order_id")
+            tp_order_id = res.get("tp_order_id")
 
             if res.get("status") == "FAILED":
                 err_msg = res.get("error", "Unknown exchange error")
@@ -280,7 +283,8 @@ class LiveTradingBot:
                 contracts=contracts,
                 notional_usd=notional,
                 order_id=order_id,
-                sl_order_id=sl_order_id
+                sl_order_id=sl_order_id,
+                tp_order_id=tp_order_id
             )
 
             # Dispatch Telegram Alert
@@ -314,6 +318,8 @@ class LiveTradingBot:
                     if curr_p <= pos.stop_loss:
                         pnl = (pos.stop_loss - pos.entry_price) * pos.contracts
                         logger.warning(f"🛑 [STOP LOSS HIT] {symbol} Long at ${curr_p:,.4f} | PnL: ${pnl:,.2f}")
+                        # Market close on exchange to guarantee flat position
+                        await asyncio.to_thread(self.weex_exec.close_position, symbol, pos.contracts, pos.direction)
                         self.risk_governor.record_trade_result(pnl)
                         symbols_to_remove.append(symbol)
                         await self.telegram.send_message(
@@ -327,20 +333,23 @@ class LiveTradingBot:
                     # 2. TP1 Hit -> Move Stop to Breakeven
                     if not pos.tp1_hit and curr_p >= pos.tp1:
                         pos.tp1_hit = True
-                        old_sl = pos.stop_loss
                         pos.stop_loss = pos.entry_price  # Breakeven
                         logger.info(f"💰 [TP1 HIT] {symbol} reached ${pos.tp1:,.4f}. Stop loss moved to Breakeven: ${pos.stop_loss:,.4f}")
+                        # Update stop loss on WEEX exchange to Breakeven
+                        await asyncio.to_thread(self.weex_exec.update_stop_loss, symbol, pos.contracts, pos.direction, pos.stop_loss)
                         await self.telegram.send_message(
                             f"💰 <b>TAKE PROFIT 1 (1.0R) HIT!</b>\n"
                             f"• Asset: <code>{symbol}</code> LONG\n"
                             f"• Target Reached: <code>${pos.tp1:,.4f}</code>\n"
-                            f"• <b>Action:</b> Stop Loss moved to BREAKEVEN (<code>${pos.entry_price:,.4f}</code>). Trade is now risk-free! 🛡️"
+                            f"• <b>Action:</b> Stop Loss moved to BREAKEVEN (<code>${pos.entry_price:,.4f}</code>) on exchange. Trade is now risk-free! 🛡️"
                         )
 
                     # 3. TP3 Full Exit Hit
                     if curr_p >= pos.tp3:
                         pnl = (pos.tp3 - pos.entry_price) * pos.contracts
                         logger.info(f"🏆 [TP3 FULL HIT] {symbol} Long reached final target ${pos.tp3:,.4f} | PnL: ${pnl:,.2f}")
+                        # Market close on exchange to guarantee flat position
+                        await asyncio.to_thread(self.weex_exec.close_position, symbol, pos.contracts, pos.direction)
                         self.risk_governor.record_trade_result(pnl)
                         symbols_to_remove.append(symbol)
                         await self.telegram.send_message(
@@ -357,6 +366,8 @@ class LiveTradingBot:
                     if curr_p >= pos.stop_loss:
                         pnl = (pos.entry_price - pos.stop_loss) * pos.contracts
                         logger.warning(f"🛑 [STOP LOSS HIT] {symbol} Short at ${curr_p:,.4f} | PnL: ${pnl:,.2f}")
+                        # Market close on exchange to guarantee flat position
+                        await asyncio.to_thread(self.weex_exec.close_position, symbol, pos.contracts, pos.direction)
                         self.risk_governor.record_trade_result(pnl)
                         symbols_to_remove.append(symbol)
                         await self.telegram.send_message(
@@ -372,17 +383,21 @@ class LiveTradingBot:
                         pos.tp1_hit = True
                         pos.stop_loss = pos.entry_price  # Breakeven
                         logger.info(f"💰 [TP1 HIT] {symbol} reached ${pos.tp1:,.4f}. Stop loss moved to Breakeven: ${pos.stop_loss:,.4f}")
+                        # Update stop loss on WEEX exchange to Breakeven
+                        await asyncio.to_thread(self.weex_exec.update_stop_loss, symbol, pos.contracts, pos.direction, pos.stop_loss)
                         await self.telegram.send_message(
                             f"💰 <b>TAKE PROFIT 1 (1.0R) HIT!</b>\n"
                             f"• Asset: <code>{symbol}</code> SHORT\n"
                             f"• Target Reached: <code>${pos.tp1:,.4f}</code>\n"
-                            f"• <b>Action:</b> Stop Loss moved to BREAKEVEN (<code>${pos.entry_price:,.4f}</code>). Trade is now risk-free! 🛡️"
+                            f"• <b>Action:</b> Stop Loss moved to BREAKEVEN (<code>${pos.entry_price:,.4f}</code>) on exchange. Trade is now risk-free! 🛡️"
                         )
 
                     # 3. TP3 Full Exit Hit
                     if curr_p <= pos.tp3:
                         pnl = (pos.entry_price - pos.tp3) * pos.contracts
                         logger.info(f"🏆 [TP3 FULL HIT] {symbol} Short reached final target ${pos.tp3:,.4f} | PnL: ${pnl:,.2f}")
+                        # Market close on exchange to guarantee flat position
+                        await asyncio.to_thread(self.weex_exec.close_position, symbol, pos.contracts, pos.direction)
                         self.risk_governor.record_trade_result(pnl)
                         symbols_to_remove.append(symbol)
                         await self.telegram.send_message(

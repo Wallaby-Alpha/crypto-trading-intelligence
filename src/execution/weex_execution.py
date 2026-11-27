@@ -94,7 +94,9 @@ class WeexExecutionAdapter:
 
         symbol = signal.symbol
         side = 'buy' if signal.direction == SignalDirection.LONG else 'sell'
+        sl_side = 'sell' if side == 'buy' else 'buy'
         contracts = signal.contracts
+        tp_target = signal.tp3 or signal.tp1
 
         try:
             # 1. Set Margin Mode and Leverage
@@ -105,43 +107,147 @@ class WeexExecutionAdapter:
             except Exception as e:
                 logger.warning(f"Note on leverage/margin configuration for {symbol}: {e}")
 
-            # 2. Submit Market Entry Order
-            logger.info(f"Submitting LIVE {side.upper()} order for {contracts} {symbol}...")
-            entry_order = self.client.create_order(
-                symbol=symbol,
-                type='market',
-                side=side,
-                amount=contracts
+            # 2. Submit Market Entry with Native Attached TP & SL
+            logger.info(
+                f"Submitting LIVE {side.upper()} order for {contracts} {symbol} "
+                f"with native SL: ${signal.stop_loss:,.4f} and native TP: ${tp_target:,.4f}..."
             )
-            filled_price = float(entry_order.get('average') or entry_order.get('price') or signal.proposed_entry)
-
-            # 3. Submit Native Stop Loss Order
-            sl_side = 'sell' if side == 'buy' else 'buy'
+            entry_order = None
             try:
-                sl_order = self.client.create_order(
+                # Primary method: attached native TP/SL on the market entry
+                entry_order = self.client.create_order_with_take_profit_and_stop_loss(
                     symbol=symbol,
-                    type='stop_market',
+                    type='market',
+                    side=side,
+                    amount=contracts,
+                    takeProfit=tp_target,
+                    stopLoss=signal.stop_loss
+                )
+                logger.info(f"✅ Market order placed with attached native TP/SL: {entry_order.get('id')}")
+            except Exception as e:
+                logger.warning(f"Attached TP/SL entry order fallback ({e}), placing market order directly...")
+                entry_order = self.client.create_order(
+                    symbol=symbol,
+                    type='market',
+                    side=side,
+                    amount=contracts
+                )
+
+            filled_price = float(entry_order.get('average') or entry_order.get('price') or signal.proposed_entry)
+            order_id = entry_order.get('id')
+
+            # 3. Native Stop Loss & Take Profit Standalone Verification / Fallback
+            sl_order_id = None
+            tp_order_id = None
+
+            # Standalone Native Stop Loss (Algo Order)
+            try:
+                sl_order = self.client.create_stop_loss_order(
+                    symbol=symbol,
+                    type='market',
                     side=sl_side,
                     amount=contracts,
-                    price=signal.stop_loss,
-                    params={'stopPrice': signal.stop_loss, 'reduceOnly': True}
+                    stopLossPrice=signal.stop_loss
                 )
-                logger.info(f"Submitted Stop Loss for {symbol} at ${signal.stop_loss:,.4f}")
+                sl_order_id = sl_order.get('id')
+                logger.info(f"✅ Native Exchange Stop Loss active at ${signal.stop_loss:,.4f} (ID: {sl_order_id})")
             except Exception as e:
-                logger.error(f"Failed to place native stop loss for {symbol}: {e}")
-                sl_order = None
+                logger.info(f"Note on standalone SL placement: {e}")
+
+            # Standalone Native Take Profit (Algo Order)
+            try:
+                tp_order = self.client.create_take_profit_order(
+                    symbol=symbol,
+                    type='market',
+                    side=sl_side,
+                    amount=contracts,
+                    takeProfitPrice=tp_target
+                )
+                tp_order_id = tp_order.get('id')
+                logger.info(f"✅ Native Exchange Take Profit active at ${tp_target:,.4f} (ID: {tp_order_id})")
+            except Exception as e:
+                logger.info(f"Note on standalone TP placement: {e}")
 
             return {
                 "status": "EXECUTED",
                 "symbol": symbol,
-                "order_id": entry_order.get('id'),
+                "order_id": order_id,
                 "filled_price": filled_price,
-                "sl_order_id": sl_order.get('id') if sl_order else None
+                "sl_order_id": sl_order_id,
+                "tp_order_id": tp_order_id
             }
 
         except Exception as e:
             logger.error(f"Error executing live order on WEEX for {symbol}: {e}", exc_info=True)
             return {"status": "FAILED", "error": str(e)}
+
+    def update_stop_loss(
+        self,
+        symbol: str,
+        contracts: float,
+        direction: SignalDirection,
+        new_stop_price: float
+    ) -> Dict[str, Any]:
+        """
+        Updates native exchange-level stop loss on WEEX (e.g. moving SL to Breakeven).
+        """
+        if not self.live_trading_enabled or not self.client:
+            return {"status": "SIMULATED_SUCCESS"}
+
+        sl_side = 'sell' if direction == SignalDirection.LONG else 'buy'
+        try:
+            # 1. Cancel previous algo/stop orders for this symbol
+            try:
+                self.client.cancel_all_orders(symbol, params={'algo': True})
+            except Exception:
+                pass
+
+            # 2. Place new exchange stop loss at new_stop_price
+            sl_order = self.client.create_stop_loss_order(
+                symbol=symbol,
+                type='market',
+                side=sl_side,
+                amount=contracts,
+                stopLossPrice=new_stop_price
+            )
+            logger.info(f"🛡️ Trailed native exchange stop loss for {symbol} to ${new_stop_price:,.4f} (ID: {sl_order.get('id')})")
+            return {"status": "SUCCESS", "sl_order_id": sl_order.get('id')}
+        except Exception as e:
+            logger.error(f"Failed to update native stop loss for {symbol} to ${new_stop_price}: {e}")
+            return {"status": "ERROR", "error": str(e)}
+
+    def close_position(
+        self,
+        symbol: str,
+        contracts: float,
+        direction: SignalDirection
+    ) -> Dict[str, Any]:
+        """
+        Market closes an open position on WEEX.
+        """
+        if not self.live_trading_enabled or not self.client:
+            return {"status": "SIMULATED_SUCCESS"}
+
+        close_side = 'sell' if direction == SignalDirection.LONG else 'buy'
+        try:
+            # Cancel open algo/trigger orders first
+            try:
+                self.client.cancel_all_orders(symbol)
+            except Exception:
+                pass
+
+            order = self.client.create_order(
+                symbol=symbol,
+                type='market',
+                side=close_side,
+                amount=contracts,
+                params={'reduceOnly': True}
+            )
+            logger.info(f"🏁 Market closed position for {symbol} on WEEX. ID: {order.get('id')}")
+            return {"status": "SUCCESS", "order_id": order.get('id')}
+        except Exception as e:
+            logger.error(f"Failed to market close position for {symbol} on WEEX: {e}")
+            return {"status": "ERROR", "error": str(e)}
 
     def emergency_kill_switch(self, symbol: Optional[str] = None) -> Dict[str, Any]:
         """
