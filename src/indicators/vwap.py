@@ -77,6 +77,9 @@ class VWAPEngine:
 
         return results
 
+    # Alias
+    calculate_session_vwap = calculate_anchored_vwap
+
     def calculate_rolling_vwap(self, candles: List[Candle], window: int = 50) -> List[VWAPBand]:
         """
         Calculates rolling window VWAP over the last N candles.
@@ -118,4 +121,7 @@ class VWAPEngine:
             ))
 
         return results
+
+    # Alias
+    calculate_session_vwap = calculate_anchored_vwap
 

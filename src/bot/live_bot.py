@@ -182,10 +182,11 @@ class LiveTradingBot:
                 return
 
             # Real-time indicators
-            cvd_bars = self.cvd_engine.calculate_cvd(candles_15m)
-            vwap_bands = self.vwap_engine.calculate_session_vwap(candles_15m)
+            cvd_bars = self.cvd_engine.estimate_from_candles(candles_15m)
+            vwap_bands = self.vwap_engine.calculate_anchored_vwap(candles_15m)
             vp = self.vp_engine.compute_profile(candles_15m[-50:])
-            atr = self.vol_engine.calculate_atr(candles_15m)
+            atr_series = self.vol_engine.calculate_atr(candles_15m)
+            atr = atr_series[-1] if atr_series else max(0.01, candles_15m[-1].high - candles_15m[-1].low)
 
             current_candle = candles_15m[-1]
             current_price = current_candle.close

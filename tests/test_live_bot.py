@@ -75,3 +75,40 @@ def test_active_position_breakeven_logic():
     assert pos.tp1_hit is True
     assert pos.stop_loss == 150.0  # Stop Loss is now locked at entry (risk free)
 
+
+@pytest.mark.asyncio
+async def test_live_bot_scan_symbol_pipeline():
+    from unittest.mock import MagicMock
+    from src.bot.live_bot import LiveTradingBot
+    from src.core.models import Candle, DataQualityStatus
+
+    bot = LiveTradingBot()
+
+    # Generate 50 dummy candles
+    dummy_candles = []
+    base_ts = 1700000000000
+    for i in range(50):
+        dummy_candles.append(Candle(
+            symbol="BTC/USDT:USDT",
+            exchange="weex",
+            timeframe="15m",
+            timestamp=base_ts + i * 900000,
+            datetime=f"2026-11-26T00:{i:02d}:00Z",
+            open=90000.0 + i * 10,
+            high=90050.0 + i * 10,
+            low=89950.0 + i * 10,
+            close=90020.0 + i * 10,
+            volume=10.0 + i,
+            quote_volume=None,
+            is_closed=True,
+            quality_status=DataQualityStatus.VALID
+        ))
+
+    bot.weex_data.fetch_ohlcv = MagicMock(return_value=dummy_candles)
+    bot.calculate_htf_trend = MagicMock(return_value="BULLISH")
+    bot.telegram.send_message = MagicMock(return_value=True)
+
+    # Ensure scan_symbol completes without any AttributeError or TypeError
+    await bot.scan_symbol("BTC/USDT:USDT")
+
+

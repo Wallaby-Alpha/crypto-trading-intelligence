@@ -127,6 +127,9 @@ class CVDEngine:
         self._calculate_momentum(bars)
         return bars
 
+    # Method alias
+    calculate_cvd = estimate_from_candles
+
     def _calculate_momentum(self, bars: List[CVDBar]):
         for i in range(len(bars)):
             if i >= self.momentum_window:
