@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # Autonomous Trading Bot Service
   weex-bot:
