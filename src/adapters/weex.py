@@ -40,6 +40,9 @@ class WeexAdapter(BaseExchangeAdapter):
             self._markets_cache = self.client.load_markets(reload=reload)
         return self._markets_cache
 
+    def fetch_markets(self) -> List[Dict[str, Any]]:
+        return list(self.load_markets().values())
+
     def get_swap_symbols(self) -> List[str]:
         markets = self.load_markets()
         return [

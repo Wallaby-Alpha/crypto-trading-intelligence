@@ -123,11 +123,9 @@ class LiveTradingBot:
         """Loads exchange market limits and checks credentials."""
         logger.info("Initializing Live WEEX Trading Bot...")
         try:
-            markets = await self.weex_data.fetch_markets()
-            for m in markets:
-                sym = m.get("symbol")
-                if sym:
-                    self.market_metadata[sym] = m
+            markets = await asyncio.to_thread(self.weex_data.load_markets)
+            for sym, m in markets.items():
+                self.market_metadata[sym] = m
             logger.info(f"Loaded metadata for {len(self.market_metadata)} markets on WEEX.")
         except Exception as e:
             logger.warning(f"Could not load full market metadata: {e}")
@@ -147,7 +145,7 @@ class LiveTradingBot:
     async def calculate_htf_trend(self, symbol: str) -> str:
         """Calculates 1H EMA20 vs EMA50 trend direction with zero look-ahead bias."""
         try:
-            candles_1h = await self.weex_data.fetch_ohlcv(symbol, timeframe="1h", limit=60)
+            candles_1h = await asyncio.to_thread(self.weex_data.fetch_ohlcv, symbol, timeframe="1h", limit=60)
             if len(candles_1h) < 50:
                 return "NEUTRAL"
 
@@ -179,7 +177,7 @@ class LiveTradingBot:
                 return
 
             # Fetch recent 15m candles
-            candles_15m = await self.weex_data.fetch_ohlcv(symbol, timeframe="15m", limit=60)
+            candles_15m = await asyncio.to_thread(self.weex_data.fetch_ohlcv, symbol, timeframe="15m", limit=60)
             if len(candles_15m) < 35:
                 return
 
@@ -272,11 +270,13 @@ class LiveTradingBot:
         for symbol, pos in self.active_positions.items():
             try:
                 # Fetch current ticker price
-                ticker = await self.weex_data.fetch_ticker(symbol)
-                if not ticker or not ticker.get("last"):
+                ticker = await asyncio.to_thread(self.weex_data.fetch_ticker, symbol)
+                if not ticker:
                     continue
 
-                curr_p = float(ticker["last"])
+                curr_p = float(ticker.last if hasattr(ticker, "last") else (ticker.get("last") or 0.0))
+                if not curr_p:
+                    continue
 
                 # Check Long Position
                 if pos.direction == SignalDirection.LONG:
